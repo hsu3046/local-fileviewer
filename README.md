@@ -1,4 +1,4 @@
-# 📁 Local File Viewer
+# 🎨 Gallery VR
 
 ## Summary-en
 
@@ -46,8 +46,8 @@ This app runs on your own computer. You need:
 
 ```bash
 # 1. Clone or download this project
-git clone https://github.com/KnowAI/local-fileviewer.git
-cd local-fileviewer
+git clone https://github.com/KnowAI/gallery-vr.git
+cd gallery-vr
 
 # 2. Install dependencies (first time only)
 npm install

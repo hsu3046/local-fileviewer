@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ─── Local File Gallery — Quick Start ───
+# ─── Gallery VR — Quick Start ───
 # Finder에서 더블클릭하면 서버가 자동으로 시작됩니다.
 
 # 이 파일이 위치한 디렉토리로 이동
