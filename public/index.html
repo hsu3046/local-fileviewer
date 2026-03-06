@@ -56,12 +56,11 @@
     </div>
     <div class="header-right">
       <div class="file-count" id="file-count"></div>
-      <button class="icon-btn" id="btn-select-mode" title="Spatial View" aria-label="Spatial View">
+      <button class="icon-btn" id="btn-card-view" title="카드 뷰" aria-label="카드 뷰">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round">
-          <rect x="2" y="10" width="11" height="11" rx="1.5" />
-          <path d="M6 10V7.5A1.5 1.5 0 0 1 7.5 6h9A1.5 1.5 0 0 1 18 7.5v9a1.5 1.5 0 0 1-1.5 1.5H13" />
-          <path d="M10 6V3.5A1.5 1.5 0 0 1 11.5 2H21a1.5 1.5 0 0 1 1.5 1.5V13a1.5 1.5 0 0 1-1.5 1.5h-2.5" />
+          <rect x="4" y="2" width="16" height="8" rx="2" />
+          <rect x="4" y="14" width="16" height="8" rx="2" />
         </svg>
       </button>
       <button class="icon-btn" id="btn-view-toggle" title="뷰 전환" aria-label="뷰 전환">
@@ -126,16 +125,44 @@
     </div>
   </main>
 
-  <!-- Spatial View Action Bar -->
-  <div class="spatial-bar" id="spatial-bar" style="display:none">
-    <div class="spatial-bar-info">
-      <span id="spatial-bar-count">0개 선택됨</span>
-      <span class="spatial-bar-hint">(최대 6개)</span>
+  <!-- Immersive Card View -->
+  <div class="card-view" id="card-view">
+    <div class="card-view-toolbar" id="card-view-toolbar">
+      <div class="card-view-info" id="card-view-info"></div>
+      <div class="card-view-actions">
+        <button class="icon-btn light" id="btn-card-slideshow" title="슬라이드쇼" aria-label="슬라이드쇼">
+          <svg id="icon-slideshow-play" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <polygon points="6 3 20 12 6 21" />
+          </svg>
+          <svg id="icon-slideshow-pause" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none"
+            style="display:none">
+            <rect x="5" y="3" width="5" height="18" rx="1" />
+            <rect x="14" y="3" width="5" height="18" rx="1" />
+          </svg>
+        </button>
+        <button class="icon-btn light" id="btn-card-favorite" title="즐겨찾기" aria-label="즐겨찾기">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polygon
+              points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          </svg>
+        </button>
+        <button class="icon-btn light" id="btn-card-close" title="닫기" aria-label="닫기">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
     </div>
-    <div class="spatial-bar-actions">
-      <button class="spatial-btn secondary" id="btn-select-all" title="이미지 전체 선택">전체 선택</button>
-      <button class="spatial-btn primary" id="btn-spatial-open" disabled>Spatial View</button>
+    <div class="card-view-scroll" id="card-view-scroll">
+      <!-- Cards rendered dynamically -->
     </div>
+    <div class="card-crossfade" id="card-crossfade">
+      <img class="crossfade-front" id="crossfade-front" draggable="false" />
+      <img class="crossfade-back" id="crossfade-back" draggable="false" />
+    </div>
+    <div class="card-view-counter" id="card-view-counter"></div>
   </div>
 
   <!-- Lightbox / Full-size Viewer -->

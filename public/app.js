@@ -15,8 +15,6 @@
     let zoomMode = 'fit'; // 'fit' or 'full'
     let favoriteSet = new Set(); // set of favorite file paths
     let showFavoritesOnly = false;
-    let isSelectMode = false;
-    let selectedFiles = new Set(); // set of selected file paths
 
     // ─── DOM Elements ───
     const $ = (sel) => document.querySelector(sel);
@@ -36,8 +34,7 @@
     const lightboxContent = $('#lightbox-content');
     const lightboxInfo = $('#lightbox-info');
     const lightboxCounter = $('#lightbox-counter');
-    const spatialBar = $('#spatial-bar');
-    const spatialBarCount = $('#spatial-bar-count');
+
 
     // ─── Initialize ───
     init();
@@ -138,10 +135,11 @@
         // Favorites filter
         $('#btn-favorites-filter').addEventListener('click', toggleFavoritesFilter);
 
-        // Selection mode
-        $('#btn-select-mode').addEventListener('click', toggleSelectMode);
-        $('#btn-spatial-open').addEventListener('click', openSpatialView);
-        $('#btn-select-all').addEventListener('click', selectAllImages);
+        // Card view
+        $('#btn-card-view').addEventListener('click', openCardView);
+        $('#btn-card-close').addEventListener('click', closeCardView);
+        $('#btn-card-favorite').addEventListener('click', toggleCardFavorite);
+        $('#btn-card-slideshow').addEventListener('click', toggleSlideshow);
 
         // Lightbox controls
         $('#lightbox-backdrop').addEventListener('click', closeLightbox);
@@ -307,17 +305,6 @@
             preview.appendChild(favBadge);
         }
 
-        // Selection checkbox (always in DOM, shown via CSS when select mode active)
-        if (isSelectMode && file.category === 'image') {
-            const checkbox = document.createElement('div');
-            checkbox.className = 'card-checkbox';
-            checkbox.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-            preview.appendChild(checkbox);
-
-            if (selectedFiles.has(file.path)) {
-                card.classList.add('selected');
-            }
-        }
 
         const info = document.createElement('div');
         info.className = 'card-info';
@@ -345,12 +332,6 @@
 
     // ─── Card Click ───
     function handleCardClick(file) {
-        // Selection mode: toggle image selection
-        if (isSelectMode && file.category === 'image') {
-            toggleFileSelection(file.path);
-            return;
-        }
-
         if (file.isDirectory) {
             navigateTo(file.path);
         } else if (['image', 'video', 'pdf'].includes(file.category)) {
@@ -566,20 +547,21 @@
     // Supports: swipe L/R (prev/next with slide animation),
     //           swipe down (close lightbox),
     //           swipe up (toggle favorite),
-    //           double-tap (fullscreen toggle, instant — no timer delay),
-    //           long-press (500ms hold = zoom toggle),
+    //           double-tap (fullscreen toggle),
+    //           triple-tap (zoom toggle),
     //           drag-to-pan when zoomed
     function setupGestures() {
         let pointerDown = false;
         let startX = 0, startY = 0;
         let startTime = 0;
+        let tapCount = 0;
         let lastTapTime = 0;
         let lastTapX = 0, lastTapY = 0;
-        const DOUBLE_TAP_DELAY = 350; // ms
+        let multiTapTimer = null;
+        const MULTI_TAP_DELAY = 400;  // ms window for multi-tap
         const SWIPE_THRESHOLD = 50;   // px
         const TAP_THRESHOLD = 15;     // px (max move to count as tap)
         const SWIPE_DOWN_THRESHOLD = 80; // px
-        const LONG_PRESS_DURATION = 500; // ms
 
         // Zoom state
         let isZoomed = false;
@@ -587,8 +569,6 @@
         let panX = 0, panY = 0;
         let panStartX = 0, panStartY = 0;
         let isPanning = false;
-        let longPressTimer = null;
-        let longPressFired = false;
         let isDraggingHorizontal = false;
         let isDraggingVertical = false;
 
@@ -604,25 +584,12 @@
             startX = e.clientX;
             startY = e.clientY;
             startTime = Date.now();
-            longPressFired = false;
 
             if (isZoomed) {
                 isPanning = true;
                 panStartX = panX;
                 panStartY = panY;
                 lightboxContent.style.cursor = 'grabbing';
-            }
-
-            // Start long-press timer for zoom (only for images, not zoomed)
-            clearTimeout(longPressTimer);
-            if (!isZoomed) {
-                const pressX = e.clientX;
-                const pressY = e.clientY;
-                longPressTimer = setTimeout(() => {
-                    // Verify finger hasn't moved much
-                    longPressFired = true;
-                    handleLongPress(pressX, pressY);
-                }, LONG_PRESS_DURATION);
             }
         }, { passive: true });
 
@@ -656,7 +623,6 @@
 
             // Horizontal drag → image follows finger
             if (isDraggingHorizontal) {
-                clearTimeout(longPressTimer); // cancel long-press if swiping
                 const content = lightboxContent.querySelector('img, video, iframe');
                 if (content) {
                     const resistance = 0.6;
@@ -669,7 +635,6 @@
 
             // Vertical drag (down) → image follows finger downward with fade
             if (isDraggingVertical && dy > 0) {
-                clearTimeout(longPressTimer); // cancel long-press if swiping
                 const content = lightboxContent.querySelector('img, video, iframe');
                 const backdrop = $('#lightbox-backdrop');
                 if (content) {
@@ -683,17 +648,13 @@
                 e.preventDefault();
             }
 
-            // Vertical drag (up) → cancel long-press
-            if (isDraggingVertical && dy < 0) {
-                clearTimeout(longPressTimer);
-            }
+
         });
 
         lightbox.addEventListener('pointerup', (e) => {
             if (!pointerDown) return;
             pointerDown = false;
             isPanning = false;
-            clearTimeout(longPressTimer);
             const wasDraggingH = isDraggingHorizontal;
             const wasDraggingV = isDraggingVertical;
             isDraggingHorizontal = false;
@@ -808,23 +769,40 @@
             // Reset any drag styles if no swipe was triggered
             resetDragStyles();
 
-            // --- TAP DETECTION (double-tap only, no single-tap delay) ---
-            if (!longPressFired && dist < TAP_THRESHOLD && dt < 400) {
+            // --- TAP DETECTION (multi-tap: double=fullscreen, triple=zoom) ---
+            if (dist < TAP_THRESHOLD && dt < 400) {
                 const timeSinceLastTap = now - lastTapTime;
                 const tapDist = Math.sqrt(
                     (e.clientX - lastTapX) ** 2 + (e.clientY - lastTapY) ** 2
                 );
 
-                if (timeSinceLastTap < DOUBLE_TAP_DELAY && tapDist < 50) {
-                    // === DOUBLE TAP → fullscreen (instant) ===
-                    lastTapTime = 0;
-                    handleDoubleTap(e);
+                if (timeSinceLastTap < MULTI_TAP_DELAY && tapDist < 50) {
+                    tapCount++;
                 } else {
-                    // Record this tap for potential double-tap
-                    lastTapTime = now;
-                    lastTapX = e.clientX;
-                    lastTapY = e.clientY;
-                    // No single-tap action — just wait for possible double-tap
+                    tapCount = 1;
+                }
+
+                lastTapTime = now;
+                lastTapX = e.clientX;
+                lastTapY = e.clientY;
+
+                // Clear previous timer and wait for more taps
+                clearTimeout(multiTapTimer);
+
+                if (tapCount >= 3) {
+                    // === TRIPLE TAP → zoom toggle (instant) ===
+                    tapCount = 0;
+                    handleTripleTap(e);
+                } else {
+                    // Wait to see if more taps are coming
+                    multiTapTimer = setTimeout(() => {
+                        if (tapCount === 2) {
+                            // === DOUBLE TAP → fullscreen ===
+                            handleDoubleTap(e);
+                        }
+                        // Single tap = no action
+                        tapCount = 0;
+                    }, MULTI_TAP_DELAY);
                 }
             }
         });
@@ -834,8 +812,8 @@
             isPanning = false;
             isDraggingHorizontal = false;
             isDraggingVertical = false;
-            longPressFired = false;
-            clearTimeout(longPressTimer);
+            tapCount = 0;
+            clearTimeout(multiTapTimer);
             resetDragStyles();
         }, { passive: true });
 
@@ -859,16 +837,16 @@
             }
         }
 
-        function handleLongPress(pressX, pressY) {
+        function handleTripleTap(e) {
             // Only zoom images
             const img = lightboxContent.querySelector('img');
             if (!img) return;
 
             if (!isZoomed) {
-                // Zoom IN at long-press position
+                // Zoom IN at tap position
                 const rect = lightboxContent.getBoundingClientRect();
-                zoomOriginX = pressX - rect.left - rect.width / 2;
-                zoomOriginY = pressY - rect.top - rect.height / 2;
+                zoomOriginX = e.clientX - rect.left - rect.width / 2;
+                zoomOriginY = e.clientY - rect.top - rect.height / 2;
                 panX = -zoomOriginX;
                 panY = -zoomOriginY;
                 isZoomed = true;
@@ -987,7 +965,7 @@
         if (isFavorite) {
             overlay.innerHTML = `<svg viewBox="0 0 24 24" fill="#facc15" stroke="#facc15" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
         } else {
-            overlay.innerHTML = `<svg viewBox="0 0 24 24" fill="rgba(250,204,21,0.3)" stroke="#facc15" stroke-width="0.5" stroke-dasharray="1.5 2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+            overlay.innerHTML = `<svg viewBox="0 0 24 24" fill="rgba(250,204,21,0.3)" stroke="#facc15" stroke-width="0.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
         }
         document.body.appendChild(overlay);
 
@@ -1008,130 +986,386 @@
         }
     }
 
-    // ─── Selection Mode & Spatial View ───
-    const MAX_SPATIAL_WINDOWS = 6;
+    // ─── Immersive Card View ───
+    // Performance: only images near the viewport are loaded (Intersection Observer).
+    // Far-away images have their src cleared to free GPU/memory.
+    const CARD_LOAD_MARGIN = '200%'; // load images 2 screens ahead
+    const SLIDESHOW_INTERVAL_MS = 3000; // ← 슬라이드쇼 간격 (ms). 여기서 조정
+    let cardViewImages = [];         // image file objects for card view
+    let cardViewIndex = 0;           // current visible card index
+    let cardObserver = null;         // IntersectionObserver instance
+    let slideshowTimer = null;       // slideshow interval ID
+    let isSlideshowPlaying = false;
 
-    function toggleSelectMode() {
-        isSelectMode = !isSelectMode;
-        const btn = $('#btn-select-mode');
-        btn.classList.toggle('select-active', isSelectMode);
-        document.body.classList.toggle('select-mode', isSelectMode);
+    function openCardView() {
+        // Collect all images in current folder
+        cardViewImages = files.filter(f => f.category === 'image');
+        if (cardViewImages.length === 0) return;
 
-        if (!isSelectMode) {
-            // Exiting select mode — clear selections
-            selectedFiles.clear();
-            spatialBar.style.display = 'none';
-        } else {
-            spatialBar.style.display = 'flex';
+        const cardView = $('#card-view');
+        const scrollEl = $('#card-view-scroll');
+        scrollEl.innerHTML = '';
+
+        // Render card slots (lightweight — no images loaded yet)
+        cardViewImages.forEach((file, i) => {
+            const card = document.createElement('div');
+            card.className = 'card-item';
+            card.setAttribute('data-card-index', i);
+
+            // Placeholder spinner
+            const placeholder = document.createElement('div');
+            placeholder.className = 'card-placeholder';
+            card.appendChild(placeholder);
+
+            // Favorite indicator
+            if (favoriteSet.has(file.path)) {
+                const fav = document.createElement('div');
+                fav.className = 'card-fav-indicator';
+                fav.innerHTML = `<svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+                card.appendChild(fav);
+            }
+
+            scrollEl.appendChild(card);
+        });
+
+        // Setup lazy loading observer
+        setupCardObserver(scrollEl);
+
+        // Show card view
+        cardView.classList.add('active');
+        document.body.style.overflow = 'hidden';
+        cardViewIndex = 0;
+        updateCardViewUI();
+
+        // Enter browser fullscreen
+        try {
+            if (cardView.requestFullscreen) {
+                cardView.requestFullscreen().catch(() => { });
+            } else if (cardView.webkitRequestFullscreen) {
+                cardView.webkitRequestFullscreen();
+            }
+        } catch (e) { /* ignore */ }
+
+        // Track scroll for counter updates
+        scrollEl.addEventListener('scroll', onCardScroll, { passive: true });
+
+        // Keyboard
+        document.addEventListener('keydown', handleCardKeyboard);
+    }
+
+    function closeCardView() {
+        const cardView = $('#card-view');
+        const scrollEl = $('#card-view-scroll');
+
+        // Exit fullscreen first
+        const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+        if (fsEl) {
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
         }
 
-        updateSelectionUI();
+        // Stop slideshow if running
+        stopSlideshow();
 
-        // Re-render grid to show/hide checkboxes
-        if (showFavoritesOnly) {
-            renderGrid(files.filter(f => f.isFavorite || favoriteSet.has(f.path)));
+        cardView.classList.remove('active');
+        document.body.style.overflow = '';
+
+        // Cleanup observer
+        if (cardObserver) {
+            cardObserver.disconnect();
+            cardObserver = null;
+        }
+
+        // Remove listeners
+        scrollEl.removeEventListener('scroll', onCardScroll);
+        document.removeEventListener('keydown', handleCardKeyboard);
+
+        // Clear DOM to free memory
+        scrollEl.innerHTML = '';
+        cardViewImages = [];
+    }
+
+    function setupCardObserver(scrollEl) {
+        if (cardObserver) cardObserver.disconnect();
+
+        cardObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                const card = entry.target;
+                const idx = parseInt(card.getAttribute('data-card-index'));
+                const file = cardViewImages[idx];
+                if (!file) return;
+
+                if (entry.isIntersecting) {
+                    // Load image if not already loaded
+                    if (!card.querySelector('img')) {
+                        const img = document.createElement('img');
+                        img.src = authQuery(`/api/file?path=${encodeURIComponent(file.path)}`);
+                        img.alt = file.name;
+                        img.draggable = false;
+                        img.onload = () => {
+                            const spinner = card.querySelector('.card-placeholder');
+                            if (spinner) spinner.remove();
+                        };
+                        img.onerror = () => {
+                            const spinner = card.querySelector('.card-placeholder');
+                            if (spinner) spinner.remove();
+                            card.innerHTML = `<div style="color: rgba(255,255,255,0.4); font-size: 14px;">이미지를 불러올 수 없습니다</div>`;
+                        };
+                        // Insert before placeholder
+                        card.insertBefore(img, card.firstChild);
+                    }
+                } else {
+                    // Unload far-away images to free memory
+                    const img = card.querySelector('img');
+                    if (img) {
+                        img.src = '';
+                        img.remove();
+                        // Re-add placeholder if needed
+                        if (!card.querySelector('.card-placeholder')) {
+                            const ph = document.createElement('div');
+                            ph.className = 'card-placeholder';
+                            card.insertBefore(ph, card.firstChild);
+                        }
+                    }
+                }
+            });
+        }, {
+            root: scrollEl,
+            rootMargin: CARD_LOAD_MARGIN,  // preload 2 screens ahead/behind
+            threshold: 0
+        });
+
+        // Observe all card slots
+        scrollEl.querySelectorAll('.card-item').forEach(card => {
+            cardObserver.observe(card);
+        });
+    }
+
+    let _cardScrollRaf = 0;
+    function onCardScroll() {
+        cancelAnimationFrame(_cardScrollRaf);
+        _cardScrollRaf = requestAnimationFrame(() => {
+            const scrollEl = $('#card-view-scroll');
+            const scrollTop = scrollEl.scrollTop;
+            const viewH = scrollEl.clientHeight;
+            const newIndex = Math.round(scrollTop / viewH);
+            if (newIndex !== cardViewIndex && newIndex >= 0 && newIndex < cardViewImages.length) {
+                cardViewIndex = newIndex;
+                updateCardViewUI();
+            }
+        });
+    }
+
+    function updateCardViewUI() {
+        const file = cardViewImages[cardViewIndex];
+        if (!file) return;
+
+        $('#card-view-info').textContent = file.name;
+        $('#card-view-counter').textContent = `${cardViewIndex + 1} / ${cardViewImages.length}`;
+
+        // Update favorite button
+        const favBtn = $('#btn-card-favorite');
+        if (favoriteSet.has(file.path)) {
+            favBtn.classList.add('favorited');
         } else {
-            renderGrid(files);
+            favBtn.classList.remove('favorited');
         }
     }
 
-    function toggleFileSelection(filePath) {
-        if (selectedFiles.has(filePath)) {
-            selectedFiles.delete(filePath);
+    async function toggleCardFavorite() {
+        const file = cardViewImages[cardViewIndex];
+        if (!file) return;
+
+        try {
+            const res = await fetch('/api/favorites', {
+                method: 'POST',
+                headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: file.path }),
+            });
+            const data = await res.json();
+            if (data.isFavorite) {
+                favoriteSet.add(file.path);
+            } else {
+                favoriteSet.delete(file.path);
+            }
+            updateCardViewUI();
+
+            // Update fav indicator on card
+            const scrollEl = $('#card-view-scroll');
+            const card = scrollEl.children[cardViewIndex];
+            if (card) {
+                const existing = card.querySelector('.card-fav-indicator');
+                if (data.isFavorite && !existing) {
+                    const fav = document.createElement('div');
+                    fav.className = 'card-fav-indicator';
+                    fav.innerHTML = `<svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+                    card.appendChild(fav);
+                } else if (!data.isFavorite && existing) {
+                    existing.remove();
+                }
+            }
+
+            showStarAnimation(data.isFavorite);
+        } catch (err) {
+            console.error('Failed to toggle favorite:', err);
+        }
+    }
+
+    function handleCardKeyboard(e) {
+        switch (e.key) {
+            case 'Escape':
+                closeCardView();
+                break;
+            case 'ArrowDown':
+            case 'ArrowRight':
+                e.preventDefault();
+                scrollToCard(cardViewIndex + 1);
+                break;
+            case 'ArrowUp':
+            case 'ArrowLeft':
+                e.preventDefault();
+                scrollToCard(cardViewIndex - 1);
+                break;
+        }
+    }
+
+    function scrollToCard(index) {
+        if (index < 0 || index >= cardViewImages.length) return;
+        const scrollEl = $('#card-view-scroll');
+        const card = scrollEl.children[index];
+        if (card) {
+            card.scrollIntoView({ behavior: 'smooth' });
+        }
+    }
+    // ─── Slideshow ───
+    function toggleSlideshow() {
+        if (isSlideshowPlaying) {
+            stopSlideshow();
         } else {
-            if (selectedFiles.size >= MAX_SPATIAL_WINDOWS) {
-                // Show brief toast warning
-                showSelectionToast(`최대 ${MAX_SPATIAL_WINDOWS}개까지 선택 가능합니다`);
+            startSlideshow();
+        }
+    }
+
+    function startSlideshow() {
+        if (isSlideshowPlaying) return;
+        isSlideshowPlaying = true;
+        updateSlideshowIcon();
+        $('#card-view').classList.add('slideshow-active');
+        $('#btn-card-slideshow').classList.add('playing');
+
+        const frontImg = $('#crossfade-front');
+        const backImg = $('#crossfade-back');
+
+        // Disable transitions for initial setup
+        frontImg.style.transition = 'none';
+        backImg.style.transition = 'none';
+
+        // Show current image on front
+        const file = cardViewImages[cardViewIndex];
+        if (file) {
+            frontImg.src = authQuery(`/api/file?path=${encodeURIComponent(file.path)}`);
+            frontImg.style.opacity = '1';
+        }
+
+        // Preload next into back (hidden)
+        const nextFile = cardViewImages[cardViewIndex + 1];
+        if (nextFile) {
+            backImg.src = authQuery(`/api/file?path=${encodeURIComponent(nextFile.path)}`);
+        }
+        backImg.style.opacity = '0';
+
+        // Re-enable transitions after a frame
+        requestAnimationFrame(() => {
+            frontImg.style.transition = '';
+            backImg.style.transition = '';
+        });
+
+        scheduleSlideshowNext();
+    }
+
+    function scheduleSlideshowNext() {
+        slideshowTimer = setTimeout(() => {
+            if (!isSlideshowPlaying) return;
+            if (cardViewIndex >= cardViewImages.length - 1) {
+                stopSlideshow();
                 return;
             }
-            selectedFiles.add(filePath);
-        }
+            slideshowAdvance();
+        }, SLIDESHOW_INTERVAL_MS);
+    }
 
-        // Update card visual without full re-render
-        const cards = grid.querySelectorAll('.file-card');
-        cards.forEach(card => {
-            const idx = parseInt(card.getAttribute('data-index'));
-            const displayedFiles = showFavoritesOnly
-                ? files.filter(f => f.isFavorite || favoriteSet.has(f.path))
-                : files;
-            const file = displayedFiles[idx];
-            if (file && file.path === filePath) {
-                card.classList.toggle('selected', selectedFiles.has(filePath));
+    function slideshowAdvance() {
+        const frontImg = $('#crossfade-front');
+        const backImg = $('#crossfade-back');
+
+        // True crossfade: front fades out, back fades in simultaneously
+        frontImg.style.opacity = '0';
+        backImg.style.opacity = '1';
+
+        // After transition completes, swap and prepare next
+        setTimeout(() => {
+            if (!isSlideshowPlaying) return;
+
+            cardViewIndex++;
+            updateCardViewUI();
+
+            // Sync scroll position for when slideshow stops
+            const scrollEl = $('#card-view-scroll');
+            const card = scrollEl.children[cardViewIndex];
+            if (card) card.scrollIntoView({ behavior: 'instant' });
+
+            // Disable transitions for the swap
+            frontImg.style.transition = 'none';
+            backImg.style.transition = 'none';
+
+            // Swap: front takes the current (was back) image
+            frontImg.src = backImg.src;
+            frontImg.style.opacity = '1';
+
+            // Load next image into back (hidden)
+            const nextFile = cardViewImages[cardViewIndex + 1];
+            if (nextFile) {
+                backImg.src = authQuery(`/api/file?path=${encodeURIComponent(nextFile.path)}`);
             }
-        });
+            backImg.style.opacity = '0';
 
-        updateSelectionUI();
+            // Re-enable transitions after browser applies the changes
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    frontImg.style.transition = '';
+                    backImg.style.transition = '';
+
+                    // Schedule next
+                    if (isSlideshowPlaying) scheduleSlideshowNext();
+                });
+            });
+        }, 850); // slightly longer than CSS transition (0.8s)
     }
 
-    function updateSelectionUI() {
-        const count = selectedFiles.size;
-        spatialBarCount.textContent = `${count}개 선택됨`;
-        const openBtn = $('#btn-spatial-open');
-        openBtn.disabled = count === 0;
+    function stopSlideshow() {
+        if (!isSlideshowPlaying && !slideshowTimer) return;
+        isSlideshowPlaying = false;
+        clearTimeout(slideshowTimer);
+        slideshowTimer = null;
+        updateSlideshowIcon();
+        $('#card-view').classList.remove('slideshow-active');
+        $('#btn-card-slideshow').classList.remove('playing');
 
-        // Update select all button text
-        const allImages = files.filter(f => f.category === 'image');
-        const selectableCount = Math.min(allImages.length, MAX_SPATIAL_WINDOWS);
-        const allSelected = selectableCount > 0 && selectedFiles.size >= selectableCount;
-        const selectAllBtn = $('#btn-select-all');
-        selectAllBtn.textContent = allSelected ? '전체 해제' : '전체 선택';
+        // Clean up crossfade images to free memory
+        $('#crossfade-front').src = '';
+        $('#crossfade-back').src = '';
     }
 
-    function selectAllImages() {
-        const allImages = files.filter(f => f.category === 'image');
-        const selectableCount = Math.min(allImages.length, MAX_SPATIAL_WINDOWS);
-        const allSelected = selectableCount > 0 && selectedFiles.size >= selectableCount;
-
-        if (allSelected) {
-            selectedFiles.clear();
+    function updateSlideshowIcon() {
+        const playIcon = $('#icon-slideshow-play');
+        const pauseIcon = $('#icon-slideshow-pause');
+        if (isSlideshowPlaying) {
+            playIcon.style.display = 'none';
+            pauseIcon.style.display = '';
         } else {
-            selectedFiles.clear();
-            allImages.slice(0, MAX_SPATIAL_WINDOWS).forEach(f => selectedFiles.add(f.path));
+            playIcon.style.display = '';
+            pauseIcon.style.display = 'none';
         }
-
-        // Re-render to update checkboxes
-        if (showFavoritesOnly) {
-            renderGrid(files.filter(f => f.isFavorite || favoriteSet.has(f.path)));
-        } else {
-            renderGrid(files);
-        }
-        updateSelectionUI();
-    }
-
-    function openSpatialView() {
-        if (selectedFiles.size === 0) return;
-
-        const selected = Array.from(selectedFiles);
-        const baseUrl = window.location.origin;
-
-        // Open first window immediately (user gesture context)
-        const firstUrl = `${baseUrl}/spatial-view.html?path=${encodeURIComponent(selected[0])}&token=${encodeURIComponent(authToken)}`;
-        window.open(firstUrl, '_blank');
-
-        // Open remaining windows with delay
-        selected.slice(1).forEach((filePath, i) => {
-            setTimeout(() => {
-                const url = `${baseUrl}/spatial-view.html?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(authToken)}`;
-                window.open(url, '_blank');
-            }, (i + 1) * 500);
-        });
-
-        // Show feedback toast
-        showSelectionToast(`${selected.length}개 창을 열었습니다`);
-    }
-
-    function showSelectionToast(message) {
-        // Remove existing toast
-        const existing = document.querySelector('.spatial-toast');
-        if (existing) existing.remove();
-
-        const toast = document.createElement('div');
-        toast.className = 'gesture-toast spatial-toast';
-        toast.textContent = message;
-        toast.style.fontSize = '16px';
-        toast.style.fontWeight = '500';
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 1200);
     }
 
     // ─── View Toggle ───

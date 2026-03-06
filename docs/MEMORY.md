@@ -24,12 +24,12 @@
 
 ## Important Decisions
 
-### Decision: Spatial View — Multi-Window Launcher 방식 채택
-- **Date:** 2026-03-05
-- **Options:** A) CSS Grid 뷰 (한 화면에 여러 이미지), B) A-Frame WebXR 3D 갤러리, C) `window.open()` 멀티 윈도우
-- **Chosen:** C) `window.open()` 멀티 윈도우
-- **Reasoning:** Quest 3의 Spatial Locking과 조합하면 각 이미지를 물리 공간에 독립 배치 가능. 서버 변경 없이 프론트엔드만으로 구현
-- **Trade-offs:** 팝업 차단기에 의해 첫 번째 창만 열릴 수 있음 → 사용자 클릭 컨텍스트에서 호출 필수. Quest 3에서 최대 12창, 앱에서 6개로 제한
+### Decision: Immersive Card View 채택 (Spatial View 대체)
+- **Date:** 2026-03-06
+- **Problem:** Quest 3 브라우저에서 `window.open()`은 독립 공간 패널이 아닌 같은 창 내 새 탭으로 열림. JS로 공간 패널 생성 불가
+- **Failed Approach:** `window.open()` 멀티 윈도우 (setTimeout, 동기 루프, 순차 큐 모두 실패)
+- **Chosen:** Immersive Card View — CSS scroll-snap 기반 풀스크린 수직 스크롤
+- **Performance:** Intersection Observer로 뷰포트 ±2 화면만 이미지 로드, 먼 이미지는 src 해제하여 메모리 회수. CSS `contain: layout style paint`으로 레이아웃 격리
 
 ### Decision: 즐겨찾기 저장을 서버 JSON 파일로
 - **Date:** 2026-03-05
@@ -42,11 +42,11 @@
 - **Date:** 2026-03-05
 - **Reasoning:** 하트보다 별이 "즐겨찾기/북마크" 의미에 더 범용적
 
-### Decision: 줌을 롱프레스(500ms)로 변경
+### Decision: 줌을 트리플 탭으로 변경
 - **Date:** 2026-03-05
-- **Options:** A) 싱글 탭(기존), B) 더블 탭, C) 롱프레스, D) 줌 제거
-- **Chosen:** C) 롱프레스 500ms
-- **Reasoning:** VR에서 핀치 유지가 자연스럽고, 더블 탭(전체화면)과 제스처 유형이 완전히 다름 → 충돌 제로
+- **Options:** A) 싱글 탭(기존), B) 더블 탭, C) 롱프레스, D) 트리플 탭
+- **Chosen:** D) 트리플 탭
+- **Reasoning:** 롱프레스가 VR 핸드트래킹에서 다른 제스처와 심하게 충돌. 더블 탭=전체화면, 트리플 탭=줌으로 탭 횟수 기반 분리가 가장 명확
 
 ## Recurring Patterns
 
@@ -57,7 +57,8 @@
   - 멀티터치(핀치 줌) → 브라우저 자체 줌으로 가로채, 웹에 전달 안 됨
   - 핸드트래킹 정밀도 낮음 → 타이밍 기반 제스처 구분 피해야 함
   - Spatial Locking API는 **브라우저 JS에서 접근 불가** — 사용자 수동 앵커만 가능
-  - `window.open()` 동작하지만 팝업 차단기 주의 → 사용자 클릭 이벤트 컨텍스트에서만 호출
+  - `window.open()`은 **독립 공간 패널이 아닌 같은 창 내 새 탭**으로 열림 → 멀티 윈도우 불가
+  - 동시 2D 앱 창 최대 3개 (OS 레벨 제한)
 - **Fix:** 모든 제스처를 `PointerEvent` 기반으로 통일하고, 제스처 유형(탭/홀드/스와이프)으로 분리
 
 ### Pattern: SVG viewBox 내 stroke 잘림
